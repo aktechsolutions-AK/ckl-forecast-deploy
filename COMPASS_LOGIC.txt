@@ -1,0 +1,87 @@
+Compass Forecast Hub - Processing Logic
+======================================
+
+Overview
+--------
+This document explains the core logic used by the Compass Forecast Hub
+to process uploaded Excel files, generate reorder quantities, and
+produce the PO template for WMS upload.
+
+Required Files
+--------------
+1) Sales Order file
+   - Used to calculate total demand per item (Article).
+2) Inventory Balance file
+   - Used to identify on-hand quantity per Product Code.
+3) Open PO file
+   - Used to capture incoming PO quantities by Product.
+4) Procurement Forecast file (multi-tab)
+   - Tab 1: Procurement Forecast (core item list)
+   - Tab 2: Supplier Master (supplier codes, names, ETA)
+   - Tab 3: PO Template (schema reference for export headers)
+
+Key Matching Rules
+------------------
+- Item SAP No is the primary identifier.
+- Product Code can be used when Item SAP No is missing.
+- Keys are normalized by trimming, uppercasing, and removing leading zeros.
+- Sales Order (Article) and Inventory (Product Code) are matched to
+  Item SAP No / Product Code using normalized keys.
+
+Inventory Balance Consolidation
+-------------------------------
+- Inventory is consolidated by Product Code.
+- When duplicates exist, quantities are summed.
+
+Sales Order Consolidation
+-------------------------
+- Sales Order entries are consolidated by Article.
+- Weekly buckets are generated, and a Grand Total is stored per Article.
+
+Reorder Logic
+-------------
+Definitions:
+- Balance Qty = Inventory Balance + Open PO Qty - Sales Order Qty
+- Safety Stock is read from the Procurement Forecast tab.
+- LPQ (Lowest Pack Quantity) is the carton size, used for rounding.
+
+Rules:
+1) If Balance Qty < Safety Stock,
+   reorder = (Safety Stock - Balance Qty), rounded up to LPQ.
+2) If reorder is > 0 but less than LPQ, set reorder to LPQ.
+3) Items not listed in the template do not trigger reorder.
+
+Alert Status
+------------
+- Critical:
+  - Balance Qty <= 0 with Safety Stock > 0
+- Low:
+  - Balance Qty < Safety Stock
+- OK:
+  - Otherwise
+
+PO Template Generation
+----------------------
+- For each item with a reorder quantity:
+  - Supplier details (PO No, ETA Date, Supplier Name) are read from
+    the Supplier Master tab using Supplier Code.
+  - Supplier Name prefers the Supplier Master name unless it matches
+    the supplier code; then it falls back to the forecast row.
+  - Exported headers match the PO Template tab schema for WMS upload.
+
+Costs and Analytics
+-------------------
+- Order Value = Reorder Qty * Unit Cost
+- All cost totals are rounded up to 0 decimals.
+- Unit Cost is read from the "Unit Cost" column in the Procurement Forecast tab.
+  If the header is missing, column E is used as a fallback.
+
+Notes
+-----
+- If Unit Cost is missing or invalid, it is treated as 0.
+- Supplier Master ETA dates are exported as real Excel dates (dd/mm/yyyy).
+
+Revision
+--------
+- This document reflects the current processing logic implemented in
+  src/lib/excelProcessor.ts.
